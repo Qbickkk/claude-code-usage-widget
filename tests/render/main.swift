@@ -14,7 +14,7 @@ let high = UsageCache(
     updated_at: now.timeIntervalSince1970)
 
 @MainActor
-func render<V: View>(_ view: V, size: CGSize, dark: Bool, name: String) {
+func render<V: View>(_ view: V, size: CGSize, dark: Bool, name: String, lang: Lang) {
     let framed = view
         .padding(16)
         .frame(width: size.width, height: size.height, alignment: .topLeading)
@@ -23,7 +23,7 @@ func render<V: View>(_ view: V, size: CGSize, dark: Bool, name: String) {
         .padding(12)
         .background(dark ? Color.black : Color(white: 0.8))
         .environment(\.colorScheme, dark ? .dark : .light)
-        .environment(\.locale, ru)
+        .environment(\.locale, lang.locale)
     let r = ImageRenderer(content: framed)
     r.scale = 2
     guard let tiff = r.nsImage?.tiffRepresentation,
@@ -39,16 +39,15 @@ func render<V: View>(_ view: V, size: CGSize, dark: Bool, name: String) {
 MainActor.assumeIsolated {
     // Sizes chronod reports for desktop widgets on macOS 26.
     let small = CGSize(width: 164, height: 164), medium = CGSize(width: 344, height: 164)
-    for dark in [false, true] {
-        let s = dark ? "dark" : "light"
-        render(SmallUsageView(entry: UsageEntry(date: now, usage: sample)), size: small, dark: dark, name: "small-\(s)")
-        render(MediumUsageView(entry: UsageEntry(date: now, usage: sample)), size: medium, dark: dark, name: "medium-\(s)")
-    }
-    render(SmallUsageView(entry: UsageEntry(date: now, usage: high)), size: small, dark: false, name: "small-high")
-    render(MediumUsageView(entry: UsageEntry(date: now, usage: high)), size: medium, dark: true, name: "medium-high")
-    render(SmallUsageView(entry: UsageEntry(date: now, usage: nil)), size: small, dark: false, name: "small-nodata")
     var old = sample
     old.updated_at = now.timeIntervalSince1970 - 86400  // header shows the weekday: the longest case
-    render(SmallUsageView(entry: UsageEntry(date: now, usage: old)), size: small, dark: true, name: "small-oldday")
-    render(MediumUsageView(entry: UsageEntry(date: now, usage: old)), size: medium, dark: false, name: "medium-oldday")
+    for lang in Lang.allCases {
+        let l = lang.rawValue
+        render(SmallUsageView(entry: UsageEntry(date: now, usage: sample, lang: lang)), size: small, dark: false, name: "small-\(l)", lang: lang)
+        render(MediumUsageView(entry: UsageEntry(date: now, usage: sample, lang: lang)), size: medium, dark: true, name: "medium-\(l)", lang: lang)
+        render(SmallUsageView(entry: UsageEntry(date: now, usage: high, lang: lang)), size: small, dark: false, name: "small-high-\(l)", lang: lang)
+        render(SmallUsageView(entry: UsageEntry(date: now, usage: old, lang: lang)), size: small, dark: true, name: "small-oldday-\(l)", lang: lang)
+        render(MediumUsageView(entry: UsageEntry(date: now, usage: old, lang: lang)), size: medium, dark: false, name: "medium-oldday-\(l)", lang: lang)
+        render(SmallUsageView(entry: UsageEntry(date: now, usage: nil, lang: lang)), size: small, dark: false, name: "small-nodata-\(l)", lang: lang)
+    }
 }

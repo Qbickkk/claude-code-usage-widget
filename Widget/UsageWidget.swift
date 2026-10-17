@@ -8,6 +8,11 @@ func currentUsage() -> UsageCache? {
     merge(loadUsage(usageCacheURL), loadUsage(widgetSnapshotURL))
 }
 
+// The menu bar app's language (from its snapshot), so both match; the system language otherwise.
+func widgetLang() -> Lang {
+    Lang.resolve(setting: loadUsage(widgetSnapshotURL)?.lang)
+}
+
 func sampleUsage(_ now: Date) -> UsageCache {
     UsageCache(five_hour: UsageWindow(used_percentage: 42, resets_at: now.timeIntervalSince1970 + 2 * 3600),
                seven_day: UsageWindow(used_percentage: 18, resets_at: now.timeIntervalSince1970 + 3 * 86400),
@@ -16,18 +21,19 @@ func sampleUsage(_ now: Date) -> UsageCache {
 
 struct Provider: TimelineProvider {
     func placeholder(in context: Context) -> UsageEntry {
-        UsageEntry(date: Date(), usage: sampleUsage(Date()))
+        UsageEntry(date: Date(), usage: sampleUsage(Date()), lang: widgetLang())
     }
 
     func getSnapshot(in context: Context, completion: @escaping (UsageEntry) -> Void) {
         let now = Date()
-        completion(UsageEntry(date: now, usage: currentUsage() ?? (context.isPreview ? sampleUsage(now) : nil)))
+        completion(UsageEntry(date: now, usage: currentUsage() ?? (context.isPreview ? sampleUsage(now) : nil),
+                              lang: widgetLang()))
     }
 
     func getTimeline(in context: Context, completion: @escaping (Timeline<UsageEntry>) -> Void) {
         let now = Date()
-        let usage = currentUsage()
-        let entries = timelineDates(from: now, usage: usage).map { UsageEntry(date: $0, usage: usage) }
+        let usage = currentUsage(), lang = widgetLang()
+        let entries = timelineDates(from: now, usage: usage).map { UsageEntry(date: $0, usage: usage, lang: lang) }
         completion(Timeline(entries: entries, policy: .atEnd))
     }
 }
@@ -35,7 +41,7 @@ struct Provider: TimelineProvider {
 // Clicking the widget runs this; WidgetKit reloads the widget after perform() without spending
 // the reload budget. The menu bar app fetches fresh numbers if needed and stamps refreshed_at.
 struct RefreshUsageIntent: AppIntent {
-    static var title: LocalizedStringResource = "Обновить лимиты Claude Code"
+    static var title: LocalizedStringResource = "Refresh Claude Code usage"
     static var isDiscoverable = false
 
     func perform() async throws -> some IntentResult {
@@ -67,7 +73,7 @@ struct UsageWidgetView: View {
             .contentShape(Rectangle())
         }
         .buttonStyle(.plain)
-        .environment(\.locale, ru)
+        .environment(\.locale, entry.lang.locale)
         .containerBackground(.background, for: .widget)
     }
 }
@@ -77,8 +83,8 @@ struct ClaudeUsageWidget: Widget {
         StaticConfiguration(kind: "ClaudeUsage", provider: Provider()) { entry in
             UsageWidgetView(entry: entry)
         }
-        .configurationDisplayName("Claude Code — лимиты")
-        .description("Сессия (5 ч) и неделя: проценты и время сброса.")
+        .configurationDisplayName(S.widgetName(widgetLang()))
+        .description(S.widgetDescription(widgetLang()))
         .supportedFamilies([.systemSmall, .systemMedium])
     }
 }

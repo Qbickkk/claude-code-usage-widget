@@ -10,6 +10,9 @@ let usageURL = URL(string: "https://api.anthropic.com/api/oauth/usage")!
 
 func loadCache() -> UsageCache? { loadUsage(usageCacheURL) }
 
+// Picked in the menu (UserDefaults "language"); the system language when unset.
+func currentLang() -> Lang { Lang.resolve(setting: UserDefaults.standard.string(forKey: "language")) }
+
 // Same access path Claude Code uses (/usr/bin/security), so macOS doesn't prompt.
 func readKeychainCredentials() -> Data {
     let p = Process()
@@ -28,7 +31,7 @@ struct FetchResult {
     var snapshot: UsageCache?
     var status: Int?
     var retryAfter: Double?
-    var note: String?
+    var problem: APIProblem?
 }
 
 // No URLCache: URLSession.shared stores cacheable requests, Authorization header included,
@@ -45,8 +48,8 @@ func fetchUsage(_ done: @escaping (FetchResult) -> Void) {
     let token: String
     switch tokenState(from: readKeychainCredentials(), now: Date()) {
     case .ok(let t): token = t
-    case .expired: return done(FetchResult(note: "токен истёк — открой Claude Code"))
-    case .missing: return done(FetchResult(note: "нет входа Claude Code в Keychain"))
+    case .expired: return done(FetchResult(problem: .tokenExpired))
+    case .missing: return done(FetchResult(problem: .notLoggedIn))
     }
     var req = URLRequest(url: usageURL, timeoutInterval: 15)
     req.setValue("Bearer \(token)", forHTTPHeaderField: "Authorization")
@@ -60,11 +63,11 @@ func fetchUsage(_ done: @escaping (FetchResult) -> Void) {
         switch http?.statusCode {
         case 200:
             r.snapshot = data.flatMap { decodeAPIUsage($0, fetchedAt: Date()) }
-            if r.snapshot == nil { r.note = "непонятный ответ API" }
-        case 429: r.note = "API ограничил частоту запросов"
-        case 401, 403: r.note = "API отказал в доступе"
-        case nil: r.note = "нет связи с API"
-        case let code?: r.note = "ошибка API \(code)"
+            if r.snapshot == nil { r.problem = .badResponse }
+        case 429: r.problem = .rateLimited
+        case 401, 403: r.problem = .denied
+        case nil: r.problem = .offline
+        case let code?: r.problem = .http(code)
         }
         done(r)
     }.resume()
@@ -80,7 +83,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
     private var statusItem: NSStatusItem!
     private var timer: Timer?
     private var api: UsageCache?
-    private var apiNote: String?
+    private var apiProblem: APIProblem?
     private var apiDelay: TimeInterval = 300
     private var nextAPIAttempt = Date.distantPast
     private var rateLimited = false
@@ -135,11 +138,11 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
     private func finish(_ r: FetchResult) {
         fetching = false
         if let s = r.snapshot { api = s }
-        apiNote = r.note
+        apiProblem = r.problem
         rateLimited = r.status == 429
         apiDelay = nextDelay(status: r.snapshot != nil ? 200 : r.status, retryAfter: r.retryAfter, previous: apiDelay)
         nextAPIAttempt = Date().addingTimeInterval(apiDelay)
-        let status = r.status.map(String.init) ?? "-", note = r.note.map { " (\($0))" } ?? ""
+        let status = r.status.map(String.init) ?? "-", note = r.problem.map { " (\($0.text(.en)))" } ?? ""
         logger.notice("usage api: HTTP \(status, privacy: .public)\(note, privacy: .public), next attempt in \(Int(self.apiDelay)) s")
         saveAPIState()
         if ackAfterFetch {
@@ -184,7 +187,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         d.set(nextAPIAttempt.timeIntervalSince1970, forKey: "nextAPIAttempt")
         d.set(apiDelay, forKey: "apiDelay")
         d.set(rateLimited, forKey: "rateLimited")
-        d.set(apiNote, forKey: "apiNote")
+        d.set(apiProblem?.raw, forKey: "apiProblem")
     }
 
     private func restoreAPIState() {
@@ -195,7 +198,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         nextAPIAttempt = next
         apiDelay = max(d.double(forKey: "apiDelay"), 300)
         rateLimited = d.bool(forKey: "rateLimited")
-        apiNote = d.string(forKey: "apiNote")
+        apiProblem = d.string(forKey: "apiProblem").flatMap(APIProblem.init(raw:))
     }
 
     private func render() {
@@ -216,6 +219,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
     private func publishForWidget(_ usage: UsageCache?) {
         guard var snapshot = usage else { return }
         snapshot.refreshed_at = lastAck
+        snapshot.lang = currentLang().rawValue
         if snapshot != published {
             if let data = try? JSONEncoder().encode(snapshot) {
                 try? data.write(to: widgetSnapshotURL, options: .atomic)
@@ -232,39 +236,64 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
     func menuNeedsUpdate(_ menu: NSMenu) {
         menu.removeAllItems()
         let now = Date()
+        let lang = currentLang()
         let cache = loadCache()
         if let usage = merge(cache, api) {
-            for (title, w) in [("Сессия · 5 ч", usage.five_hour), ("Неделя · 7 д", usage.seven_day)] {
+            for (title, w) in [(S.sessionLong(lang), usage.five_hour), (S.weekLong(lang), usage.seven_day)] {
                 let p = percent(w, now: now)
                 addInfo(menu, "\(title)   \(bar(p))  \(pctText(p))")
-                addInfo(menu, resetText(w, now: now), secondary: true)
+                addInfo(menu, resetText(w, now: now, lang: lang), secondary: true)
             }
         } else {
-            addInfo(menu, "Нет данных — открой Claude Code")
+            addInfo(menu, S.noDataMenu(lang))
         }
         menu.addItem(.separator())
         if let u = cache?.updated_at {
-            addInfo(menu, "Claude Code: \(agoText(u, now: now))", secondary: true)
+            addInfo(menu, "Claude Code: \(agoText(u, now: now, lang: lang))", secondary: true)
         }
-        if let note = apiNote {
-            let retry = rateLimited ? ", повтор \(agoText(nextAPIAttempt.timeIntervalSince1970, now: now))" : ""
-            addInfo(menu, "API: \(note)\(retry)", secondary: true)
+        if let problem = apiProblem {
+            let retry = rateLimited ? S.apiRetry(lang, agoText(nextAPIAttempt.timeIntervalSince1970, now: now, lang: lang)) : ""
+            addInfo(menu, "API: \(problem.text(lang))\(retry)", secondary: true)
         } else if let u = api?.updated_at {
-            addInfo(menu, "API: \(agoText(u, now: now))", secondary: true)
+            addInfo(menu, "API: \(agoText(u, now: now, lang: lang))", secondary: true)
         } else {
-            addInfo(menu, "API: не нужен, пока Claude Code активен", secondary: true)
+            addInfo(menu, S.apiNotNeeded(lang), secondary: true)
         }
         menu.addItem(.separator())
-        let refresh = menu.addItem(withTitle: "Обновить сейчас", action: #selector(refreshNow), keyEquivalent: "r")
+        let refresh = menu.addItem(withTitle: S.refreshNow(lang), action: #selector(refreshNow), keyEquivalent: "r")
         refresh.target = self
         refresh.isEnabled = !fetching && !rateLimited
-        let open = menu.addItem(withTitle: "Открыть claude.ai → Usage", action: #selector(openUsage), keyEquivalent: "")
+        let open = menu.addItem(withTitle: S.openUsage(lang), action: #selector(openUsage), keyEquivalent: "")
         open.target = self
-        let login = menu.addItem(withTitle: "Запускать при входе", action: #selector(toggleLogin), keyEquivalent: "")
+        let login = menu.addItem(withTitle: S.launchAtLogin(lang), action: #selector(toggleLogin), keyEquivalent: "")
         login.target = self
         login.state = SMAppService.mainApp.status == .enabled ? .on : .off
+        menu.addItem(languageMenuItem(lang))
         menu.addItem(.separator())
-        menu.addItem(withTitle: "Выйти", action: #selector(NSApplication.terminate(_:)), keyEquivalent: "q")
+        menu.addItem(withTitle: S.quit(lang), action: #selector(NSApplication.terminate(_:)), keyEquivalent: "q")
+    }
+
+    // "System" plus each language under its own name; the choice is stored in UserDefaults "language".
+    private func languageMenuItem(_ lang: Lang) -> NSMenuItem {
+        let item = NSMenuItem(title: S.language(lang), action: nil, keyEquivalent: "")
+        let submenu = NSMenu()
+        submenu.autoenablesItems = false
+        let chosen = UserDefaults.standard.string(forKey: "language").flatMap(Lang.init(rawValue:))?.rawValue
+        let choices: [(String, String?)] = [(S.languageSystem(lang), nil)] + Lang.allCases.map { ($0.nativeName, $0.rawValue) }
+        for (title, value) in choices {
+            let choice = submenu.addItem(withTitle: title, action: #selector(chooseLanguage(_:)), keyEquivalent: "")
+            choice.target = self
+            choice.representedObject = value
+            choice.state = chosen == value ? .on : .off
+        }
+        item.submenu = submenu
+        return item
+    }
+
+    @objc private func chooseLanguage(_ sender: NSMenuItem) {
+        UserDefaults.standard.set(sender.representedObject as? String, forKey: "language")
+        render()  // writes the widget snapshot with the new language
+        WidgetCenter.shared.reloadAllTimelines()  // rare and user-initiated, worth a budgeted reload
     }
 
     private func addInfo(_ menu: NSMenu, _ text: String, secondary: Bool = false) {
@@ -299,10 +328,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
 }
 
 func printUsage(_ label: String, _ u: UsageCache?) {
-    let now = Date()
+    let now = Date(), lang = currentLang()
     guard let u else { return print("\(label): no data") }
-    print("\(label): 5h \(pctText(percent(u.five_hour, now: now))) (\(resetText(u.five_hour, now: now))); "
-        + "7d \(pctText(percent(u.seven_day, now: now))) (\(resetText(u.seven_day, now: now)))")
+    print("\(label): 5h \(pctText(percent(u.five_hour, now: now))) (\(resetText(u.five_hour, now: now, lang: lang))); "
+        + "7d \(pctText(percent(u.seven_day, now: now))) (\(resetText(u.seven_day, now: now, lang: lang)))")
 }
 
 let args = CommandLine.arguments
@@ -313,7 +342,7 @@ if args.contains("--print") {
 if args.contains("--fetch") {
     let done = DispatchSemaphore(value: 0)
     fetchUsage { r in
-        print("HTTP \(r.status.map(String.init) ?? "-")\(r.note.map { " · \($0)" } ?? "")")
+        print("HTTP \(r.status.map(String.init) ?? "-")\(r.problem.map { " · \($0.text(currentLang()))" } ?? "")")
         printUsage("api", r.snapshot)
         printUsage("merged", merge(loadCache(), r.snapshot))
         done.signal()

@@ -13,6 +13,8 @@ struct UsageCache: Codable, Equatable {
     var updated_at: Double?
     // Set by the menu bar app when it has answered a refresh request from the widget.
     var refreshed_at: Double?
+    // The menu bar app's language (Lang raw value), so the widget matches it.
+    var lang: String?
 }
 
 // Posted by the widget's refresh button (Darwin notification); the menu bar app answers it.
@@ -24,8 +26,6 @@ let widgetRefreshWait: TimeInterval = 4
 func ackReachesWidget(askedAt: Date, now: Date) -> Bool {
     now.timeIntervalSince(askedAt) < widgetRefreshWait - 0.5
 }
-
-let ru = Locale(identifier: "ru_RU")
 
 // FileManager's home points into the container when sandboxed (the widget); passwd has the real one.
 func realHomeDirectory() -> URL {
@@ -202,26 +202,32 @@ func bar(_ p: Double?) -> String {
     return String(repeating: "▰", count: filled) + String(repeating: "▱", count: 10 - filled)
 }
 
-func durationText(_ seconds: Double) -> String {
+func durationText(_ seconds: Double, _ lang: Lang) -> String {
+    let (min, hrs, days) = (S.minutes(lang), S.hours(lang), S.days(lang))
     let m = Int(seconds / 60)
-    if m < 60 { return "\(max(m, 1)) мин" }
+    if m < 60 { return "\(max(m, 1)) \(min)" }
     let h = m / 60
-    if h < 24 { return m % 60 == 0 ? "\(h) ч" : "\(h) ч \(m % 60) мин" }
-    return h % 24 == 0 ? "\(h / 24) д" : "\(h / 24) д \(h % 24) ч"
+    if h < 24 { return m % 60 == 0 ? "\(h) \(hrs)" : "\(h) \(hrs) \(m % 60) \(min)" }
+    return h % 24 == 0 ? "\(h / 24) \(days)" : "\(h / 24) \(days) \(h % 24) \(hrs)"
 }
 
-func resetText(_ w: UsageWindow?, now: Date) -> String {
-    guard let r = w?.resets_at else { return "время сброса неизвестно" }
-    let date = Date(timeIntervalSince1970: r)
-    if date <= now { return "окно уже сброшено" }
+// "23:50" today, "Tue 11:00" on another day.
+func shortTime(_ date: Date, now: Date, _ lang: Lang) -> String {
     let f = DateFormatter()
-    f.locale = ru
-    f.dateFormat = Calendar.current.isDateInToday(date) ? "HH:mm" : "EE HH:mm"
-    return "сброс \(f.string(from: date)), через \(durationText(date.timeIntervalSince(now)))"
+    f.locale = lang.locale
+    f.dateFormat = Calendar.current.isDate(date, inSameDayAs: now) ? "HH:mm" : "EE HH:mm"
+    return f.string(from: date)
 }
 
-func agoText(_ t: Double, now: Date) -> String {
+func resetText(_ w: UsageWindow?, now: Date, lang: Lang) -> String {
+    guard let r = w?.resets_at else { return S.resetUnknown(lang) }
+    let date = Date(timeIntervalSince1970: r)
+    if date <= now { return S.windowAlreadyReset(lang) }
+    return S.resetLine(lang, shortTime(date, now: now, lang), durationText(date.timeIntervalSince(now), lang))
+}
+
+func agoText(_ t: Double, now: Date, lang: Lang) -> String {
     let f = RelativeDateTimeFormatter()
-    f.locale = ru
+    f.locale = lang.locale
     return f.localizedString(for: Date(timeIntervalSince1970: t), relativeTo: now)
 }

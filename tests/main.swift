@@ -124,12 +124,38 @@ check("ack in time", ackReachesWidget(askedAt: asked, now: asked.addingTimeInter
 check("ack too late", !ackReachesWidget(askedAt: asked, now: asked.addingTimeInterval(widgetRefreshWait)))
 
 // Durations
-check("duration < 1 min", durationText(30) == "1 мин")
-check("duration minutes", durationText(48 * 60) == "48 мин")
-check("duration whole hours", durationText(2 * 3600) == "2 ч")
-check("duration hours+min", durationText(2 * 3600 + 600) == "2 ч 10 мин")
-check("duration whole day", durationText(86400 + 120) == "1 д")
-check("duration days+hours", durationText(2.5 * 86400) == "2 д 12 ч")
+check("duration < 1 min", durationText(30, .ru) == "1 мин")
+check("duration minutes", durationText(48 * 60, .ru) == "48 мин")
+check("duration whole hours", durationText(2 * 3600, .ru) == "2 ч")
+check("duration hours+min", durationText(2 * 3600 + 600, .ru) == "2 ч 10 мин")
+check("duration whole day", durationText(86400 + 120, .ru) == "1 д")
+check("duration days+hours", durationText(2.5 * 86400, .ru) == "2 д 12 ч")
+check("duration uk", durationText(2 * 3600 + 600, .uk) == "2 год 10 хв" && durationText(2.5 * 86400, .uk) == "2 дн 12 год")
+check("duration en", durationText(2 * 3600 + 600, .en) == "2 h 10 min" && durationText(2.5 * 86400, .en) == "2 d 12 h")
+
+// Language choice: first preferred language we have, English otherwise
+check("lang ru-UA first", Lang.preferred(["ru-UA", "uk-UA", "en-US"]) == .ru)
+check("lang uk", Lang.preferred(["uk-UA", "en-US"]) == .uk)
+check("lang skips unsupported", Lang.preferred(["de-DE", "en-GB"]) == .en)
+check("lang fallback en", Lang.preferred(["de-DE", "zh-Hans-CN"]) == .en)
+check("lang empty", Lang.preferred([]) == .en)
+check("lang setting auto", Lang.resolve(setting: nil, preferred: ["uk-UA"]) == .uk)
+check("lang setting override", Lang.resolve(setting: "en", preferred: ["uk-UA"]) == .en)
+check("lang setting garbage", Lang.resolve(setting: "xx", preferred: ["ru"]) == .ru)
+
+// Strings
+check("strings uk", S.session(.uk) == "Сесія" && S.refreshNow(.uk) == "Оновити зараз")
+check("strings en", S.session(.en) == "Session" && S.quit(.en) == "Quit")
+check("strings ru", S.session(.ru) == "Сессия" && S.quit(.ru) == "Завершить")
+check("format args", S.resetLine(.en, "Tue 11:00", "2 d") == "resets Tue 11:00, in 2 d")
+check("every string non-empty", S.allCases.allSatisfy { k in Lang.allCases.allSatisfy { !k($0).isEmpty } })
+let resetNow = Date(timeIntervalSince1970: 1_792_266_000)
+check("reset text uk", resetText(UsageWindow(used_percentage: 5, resets_at: 1_792_266_000 + 2880), now: resetNow, lang: .uk)
+      .hasSuffix("через 48 хв") && resetText(nil, now: resetNow, lang: .uk) == "час скидання невідомий")
+check("reset text en passed", resetText(UsageWindow(used_percentage: 5, resets_at: 1), now: resetNow, lang: .en) == "limit already reset")
+check("api problem roundtrip", APIProblem(raw: APIProblem.http(503).raw) == .http(503)
+      && APIProblem(raw: APIProblem.rateLimited.raw) == .rateLimited && APIProblem(raw: "nonsense") == nil)
+check("api problem text", APIProblem.http(503).text(.uk) == "помилка HTTP 503" && APIProblem.offline.text(.en) == "can't connect")
 
 // Paths resolve to the real home even inside the widget sandbox
 check("cache path", usageCacheURL.path.hasSuffix("/.claude/usage-cache.json") && !usageCacheURL.path.contains("/Containers/"))

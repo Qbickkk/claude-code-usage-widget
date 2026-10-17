@@ -4,6 +4,7 @@ import WidgetKit
 struct UsageEntry: TimelineEntry {
     let date: Date
     let usage: UsageCache?
+    let lang: Lang
 }
 
 let claudeAccent = Color(red: 0.85, green: 0.47, blue: 0.34)
@@ -15,19 +16,12 @@ func levelColor(_ p: Double?) -> Color {
     return claudeAccent
 }
 
-private func shortTime(_ date: Date, now: Date) -> String {
-    let f = DateFormatter()
-    f.locale = ru
-    f.dateFormat = Calendar.current.isDate(date, inSameDayAs: now) ? "HH:mm" : "EE HH:mm"
-    return f.string(from: date)
-}
-
-// ("сброс 23:50", "через 48 мин"), or nil when the reset time is unknown.
-func resetParts(_ w: UsageWindow?, now: Date) -> (String, String)? {
+// ("resets 23:50", "48 min"), ("window reset", nil) after the reset, or nil when the time is unknown.
+func resetParts(_ w: UsageWindow?, now: Date, _ lang: Lang) -> (when: String, left: String?)? {
     guard let r = w?.resets_at else { return nil }
     let date = Date(timeIntervalSince1970: r)
-    if date <= now { return ("окно сброшено", "") }
-    return ("сброс \(shortTime(date, now: now))", "через \(durationText(date.timeIntervalSince(now)))")
+    if date <= now { return (S.windowReset(lang), nil) }
+    return (S.reset(lang, shortTime(date, now: now, lang)), durationText(date.timeIntervalSince(now), lang))
 }
 
 private func clamped(_ p: Double?) -> Double { min(max(p ?? 0, 0), 100) / 100 }
@@ -71,30 +65,40 @@ struct WidgetHeader: View {
     var compact = false
 
     var body: some View {
-        HStack(spacing: 4) {
-            Text(compact ? "Claude" : "Claude Code").fontWeight(.semibold)
-            Spacer(minLength: 4)
-            // The data time must never be cut off; the title gives way first.
-            HStack(spacing: 3) {
-                if let t = entry.usage?.updated_at {
-                    Text("на \(shortTime(Date(timeIntervalSince1970: t), now: entry.date))")
-                }
-                Image(systemName: "arrow.clockwise")  // the whole widget is a refresh button
-            }
-            .fixedSize()
-            .layoutPriority(1)
+        // The data time must never be cut off; when it and the title don't both fit, drop the title.
+        ViewThatFits(in: .horizontal) {
+            row(withTitle: true)
+            row(withTitle: false)
         }
         .font(.caption2)
         .foregroundStyle(.secondary)
         .lineLimit(1)
     }
+
+    private func row(withTitle: Bool) -> some View {
+        HStack(spacing: 4) {
+            if withTitle {
+                Text(compact ? "Claude" : "Claude Code").fontWeight(.semibold).fixedSize()
+            }
+            Spacer(minLength: 4)
+            HStack(spacing: 3) {
+                if let t = entry.usage?.updated_at {
+                    Text(S.asOf(entry.lang, shortTime(Date(timeIntervalSince1970: t), now: entry.date, entry.lang)))
+                }
+                Image(systemName: "arrow.clockwise")  // the whole widget is a refresh button
+            }
+            .fixedSize()
+        }
+    }
 }
 
 struct NoDataView: View {
+    let lang: Lang
+
     var body: some View {
         VStack(alignment: .leading, spacing: 4) {
-            Text("Нет данных").font(.headline)
-            Text("Открой Claude Code или Claude Usage Bar в строке меню")
+            Text(S.noData(lang)).font(.headline)
+            Text(S.noDataHint(lang))
                 .font(.caption2)
                 .foregroundStyle(.secondary)
         }
@@ -110,11 +114,11 @@ struct SmallUsageView: View {
             WidgetHeader(entry: entry, compact: true)
             if let u = entry.usage {
                 Spacer(minLength: 6)
-                SmallWindowBlock(title: "Сессия", window: u.five_hour, now: entry.date)
+                SmallWindowBlock(title: S.session(entry.lang), window: u.five_hour, now: entry.date, lang: entry.lang)
                 Spacer(minLength: 8)
-                SmallWindowBlock(title: "Неделя", window: u.seven_day, now: entry.date)
+                SmallWindowBlock(title: S.week(entry.lang), window: u.seven_day, now: entry.date, lang: entry.lang)
             } else {
-                NoDataView()
+                NoDataView(lang: entry.lang)
             }
         }
     }
@@ -124,6 +128,7 @@ struct SmallWindowBlock: View {
     let title: String
     let window: UsageWindow?
     let now: Date
+    let lang: Lang
 
     var body: some View {
         let p = percent(window, now: now)
@@ -136,8 +141,8 @@ struct SmallWindowBlock: View {
                     .monospacedDigit()
             }
             UsageBar(value: p)
-            if let (when, left) = resetParts(window, now: now) {
-                Text(left.isEmpty ? when : "\(when) · \(left.replacingOccurrences(of: "через ", with: ""))")
+            if let (when, left) = resetParts(window, now: now, lang) {
+                Text(left.map { "\(when) · \($0)" } ?? when)
                     .font(.caption2)
                     .foregroundStyle(.secondary)
                     .lineLimit(1)
@@ -155,12 +160,12 @@ struct MediumUsageView: View {
             WidgetHeader(entry: entry)
             if let u = entry.usage {
                 HStack(spacing: 12) {
-                    RingBlock(title: "Сессия · 5 ч", window: u.five_hour, now: entry.date)
-                    RingBlock(title: "Неделя · 7 д", window: u.seven_day, now: entry.date)
+                    RingBlock(title: S.sessionLong(entry.lang), window: u.five_hour, now: entry.date, lang: entry.lang)
+                    RingBlock(title: S.weekLong(entry.lang), window: u.seven_day, now: entry.date, lang: entry.lang)
                 }
                 .frame(maxHeight: .infinity)
             } else {
-                NoDataView()
+                NoDataView(lang: entry.lang)
             }
         }
     }
@@ -170,6 +175,7 @@ struct RingBlock: View {
     let title: String
     let window: UsageWindow?
     let now: Date
+    let lang: Lang
 
     var body: some View {
         HStack(spacing: 10) {
@@ -177,10 +183,10 @@ struct RingBlock: View {
                 .frame(width: 62, height: 62)
             VStack(alignment: .leading, spacing: 3) {
                 Text(title).font(.caption.weight(.semibold))
-                if let (when, left) = resetParts(window, now: now) {
+                if let (when, left) = resetParts(window, now: now, lang) {
                     Text(when).font(.caption2)
-                    if !left.isEmpty {
-                        Text(left).font(.caption2).foregroundStyle(.secondary)
+                    if let left {
+                        Text(S.inDuration(lang, left)).font(.caption2).foregroundStyle(.secondary)
                     }
                 }
             }

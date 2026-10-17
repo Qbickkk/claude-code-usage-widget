@@ -1,18 +1,22 @@
 # Claude Usage Bar
 
+**English** · [Українська](README.uk.md) · [Русский](README.ru.md)
+
 A macOS menu bar app and desktop widget that show your **Claude Code plan usage**: the 5-hour session limit and the weekly limit, with reset times.
 
-> Unofficial personal project, not affiliated with or endorsed by Anthropic. The UI is in Russian.
+> Unofficial personal project, not affiliated with or endorsed by Anthropic.
+
+The UI is available in Ukrainian, English and Russian. It follows the system language, and you can switch it in the menu.
 
 <p>
-  <img src="docs/widget-small.png" width="188" alt="Small widget: session and weekly usage bars">
-  <img src="docs/widget-medium.png" width="368" alt="Medium widget: session and weekly usage rings">
-  <img src="docs/widget-small-high.png" width="188" alt="Small widget near the limits: orange and red">
+  <img src="docs/widget-small-en.png" width="188" alt="Small widget: session and weekly usage bars">
+  <img src="docs/widget-medium-en.png" width="368" alt="Medium widget: session and weekly usage rings">
+  <img src="docs/widget-small-high-en.png" width="188" alt="Small widget near the limits: orange and red">
 </p>
 
 ## What you get
 
-- **Menu bar:** `24% · 28%` (session · week). The text turns orange at 75% and red at 90%. The menu shows both limits with bars and reset times, how fresh the data is, and items for refresh (⌘R), claude.ai usage settings and launch at login.
+- **Menu bar:** `24% · 28%` (session · week). The text turns orange at 75% and red at 90%. The menu shows both limits with bars and reset times, how fresh the data is, and items for refresh (⌘R), claude.ai usage settings, launch at login and the language.
 - **Desktop widget (WidgetKit):** small (bars) and medium (rings), in light and dark mode. Click it to refresh it immediately.
 - **Claude Code status line:** model, context usage and both limits with reset times, for example `Opus · ctx 34% · 5h 42% ↻23:50 · 7d 18% ↻Tue 11:00`.
 
@@ -79,12 +83,13 @@ This removes the app and widget, the login item, the status line script and its 
 |---|---|
 | `statusline-usage.sh` | Status line command (bash + jq) |
 | `Shared/Usage.swift` | Logic shared by the app and the widget: merge rules, API and credential decoding, backoff, reload budget, formatting |
+| `Shared/L10n.swift` | UI strings in Ukrainian, English and Russian, and the language choice |
 | `App/main.swift` | Menu bar app (AppKit) |
 | `Widget/` | WidgetKit extension (SwiftUI, App Intents) |
 | `project.yml` | XcodeGen spec |
 
 - Tests: `tests/run.sh` runs the status line merge tests and the Swift logic tests.
-- Widget previews: `swiftc -o build/tests/render Shared/Usage.swift Widget/UsageViews.swift tests/render/main.swift && build/tests/render docs` renders PNGs like the ones above.
+- Widget previews: `swiftc -o build/tests/render Shared/Usage.swift Shared/L10n.swift Widget/UsageViews.swift tests/render/main.swift && build/tests/render docs` renders PNGs like the ones above.
 - Logs: `/usr/bin/log show --last 10m --predicate 'subsystem == "local.shulika-illia.claude-usage-bar"'`. In zsh, plain `log` is a shell builtin, so use the full path.
 - Widget troubleshooting: `/usr/bin/log show --last 10m --predicate 'process == "chronod"' | grep claude-usage-bar`.
   - "Bundle version did not match" means a widget process from the previous build is still running. `build.sh` kills it.
