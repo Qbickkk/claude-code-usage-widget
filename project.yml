@@ -1,0 +1,65 @@
+# XcodeGen spec: `xcodegen generate` creates ClaudeUsageBar.xcodeproj (build.sh does this).
+name: ClaudeUsageBar
+options:
+  deploymentTarget:
+    macOS: "14.0"
+  developmentLanguage: ru
+settings:
+  base:
+    SWIFT_VERSION: "5.0"
+    MARKETING_VERSION: "1.1"
+    CURRENT_PROJECT_VERSION: "1"
+    # Ad-hoc signing ("Sign to Run Locally"); no Apple developer team needed.
+    CODE_SIGN_STYLE: Manual
+    CODE_SIGN_IDENTITY: "-"
+    DEVELOPMENT_TEAM: ""
+    ENABLE_HARDENED_RUNTIME: NO
+    CODE_SIGN_INJECT_BASE_ENTITLEMENTS: NO
+targets:
+  ClaudeUsageBar:
+    type: application
+    platform: macOS
+    sources: [App, Shared]
+    info:
+      path: build/generated/App-Info.plist
+      properties:
+        CFBundleName: Claude Usage Bar
+        CFBundleShortVersionString: $(MARKETING_VERSION)
+        CFBundleVersion: $(CURRENT_PROJECT_VERSION)
+        CFBundleDisplayName: Claude Usage Bar
+        LSUIElement: true
+    settings:
+      base:
+        PRODUCT_BUNDLE_IDENTIFIER: local.shulika-illia.claude-usage-bar
+        PRODUCT_NAME: ClaudeUsageBar
+    dependencies:
+      - target: UsageWidget
+        embed: true
+      - sdk: WidgetKit.framework
+  UsageWidget:
+    type: app-extension
+    platform: macOS
+    sources: [Widget, Shared]
+    info:
+      path: build/generated/Widget-Info.plist
+      properties:
+        CFBundleDisplayName: Claude Usage
+        CFBundleShortVersionString: $(MARKETING_VERSION)
+        CFBundleVersion: $(CURRENT_PROJECT_VERSION)
+        NSExtension:
+          NSExtensionPointIdentifier: com.apple.widgetkit-extension
+    entitlements:
+      path: build/generated/Widget.entitlements
+      properties:
+        # Widget extensions must be sandboxed; the widget only reads the two snapshot files.
+        com.apple.security.app-sandbox: true
+        com.apple.security.temporary-exception.files.home-relative-path.read-only:
+          - /.claude/usage-cache.json
+          - /.claude/usage-widget.json
+    settings:
+      base:
+        PRODUCT_BUNDLE_IDENTIFIER: local.shulika-illia.claude-usage-bar.widget
+    dependencies:
+      - sdk: WidgetKit.framework
+      - sdk: SwiftUI.framework
+      - sdk: AppIntents.framework
