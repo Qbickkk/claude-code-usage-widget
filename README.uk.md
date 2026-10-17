@@ -94,6 +94,7 @@ jq --arg c "$HOME/.claude/statusline-usage.sh" '.statusLine = {type: "command", 
 - Діагностика віджета: `/usr/bin/log show --last 10m --predicate 'process == "chronod"' | grep claude-usage-bar`.
   - "Bundle version did not match" означає, що процес віджета з попередньої збірки досі працює. `build.sh` завершує його.
   - Через другу копію програми, зареєстровану в LaunchServices (продукт збірки Xcode), chronod ігнорує віджет. `build.sh` скасовує її реєстрацію.
+  - Клік по віджету нічого не робить, а в журналі є "There is no metadata for RefreshUsageIntent": App Intents індексуються за bundle id, тож зняття реєстрації з іншої копії програми (наприклад, збірки в іншій папці) видалило їх. Завершіть і знову відкрийте програму: під час запуску вона знову реєструє себе.
 - Щоб змінити bundle id, відредагуйте `project.yml`, підсистему `Logger` у `App/main.swift`, `refreshNotification` у `Shared/Usage.swift` і `BUNDLE_ID` в `uninstall.sh`.
 
 ## Ліцензія

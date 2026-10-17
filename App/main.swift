@@ -113,6 +113,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
                 DispatchQueue.main.async { app.widgetAskedForRefresh() }
             },
             refreshNotification as CFString, nil, .deliverImmediately)
+        // App Intents (the widget's refresh button) are indexed by bundle id, so unregistering any other
+        // copy of the app (an Xcode build product) drops them for this one too. Re-registering on launch
+        // restores them ("There is no metadata for RefreshUsageIntent").
+        LSRegisterURL(Bundle.main.bundleURL as CFURL, true)
         restoreAPIState()
         tick()
         timer = Timer.scheduledTimer(timeInterval: 15, target: self, selector: #selector(tick),

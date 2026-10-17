@@ -94,6 +94,7 @@ This removes the app and widget, the login item, the status line script and its 
 - Widget troubleshooting: `/usr/bin/log show --last 10m --predicate 'process == "chronod"' | grep claude-usage-bar`.
   - "Bundle version did not match" means a widget process from the previous build is still running. `build.sh` kills it.
   - A second copy of the app registered with LaunchServices (the Xcode build product) makes chronod ignore the widget. `build.sh` unregisters it.
+  - Clicking the widget does nothing and the log says "There is no metadata for RefreshUsageIntent": App Intents are indexed by bundle id, so unregistering another copy of the app (for example a build in another folder) removed them. Quit and reopen the app, which registers itself again on launch.
 - To change the bundle id, edit `project.yml`, the `Logger` subsystem in `App/main.swift`, `refreshNotification` in `Shared/Usage.swift`, and `BUNDLE_ID` in `uninstall.sh`.
 
 ## License
